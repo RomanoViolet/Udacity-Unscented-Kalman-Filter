@@ -6,6 +6,7 @@ This project implements the Unscented Kalman Filter (EKF) as required by the Uda
 The input data to the Unscented Kalman Filter comes from a radar and a lidar mounted on a vehicle as it tracks one object.
 The Unscented Kalman filter fuses the information from radar and lidar sensors and estimates the overall trajectory of the vehicle being tracked.
 
+Unlike the Extended Kalman Filter, the Unscented Kalman filter does not require linearization of the transfer function, and is therefore more accurate.
 
 ### How it Looks
 This project involves the Term 2 Simulator which can be downloaded [here](https://github.com/udacity/self-driving-car-sim/releases). Select "EKF/UKF" option.
