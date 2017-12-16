@@ -1,0 +1,322 @@
+//#include "json.hpp"
+#include "tools.h"
+#include <iostream>
+#include <math.h>
+#include <uWS/uWS.h>
+#include "ukf.h"
+#include "measurement_package.h"
+#include "ground_truth_package.h"
+#include <assert.h>
+
+#define DEBUG 1
+#define DEEPDEBUG 0
+
+using namespace std;
+
+void check_arguments(int argc, char* argv[]) {
+	string usage_instructions = "Usage instructions: ";
+	usage_instructions += argv[0];
+	usage_instructions += " path/to/input.txt output.txt";
+	usage_instructions += " std_a";
+	usage_instructions += " std_yawdd";
+	usage_instructions += " P00";
+	usage_instructions += " P11";
+	usage_instructions += " P22";
+	usage_instructions += " P33";
+	usage_instructions += " P44";
+
+	bool has_valid_args = false;
+
+	// make sure the user has provided input and output files
+	if (argc == 1) {
+		cerr << usage_instructions << endl;
+	} else if (argc == 2) {
+		cerr << "Please include an output file.\n" << usage_instructions
+				<< endl;
+	} else if (argc == 10) {
+		has_valid_args = true;
+	} else if (argc > 10) {
+		cerr << "Too many arguments.\n" << usage_instructions << endl;
+	}
+
+	if (!has_valid_args) {
+		exit(EXIT_FAILURE);
+	}
+}
+
+void check_files(ifstream& in_file, string& in_name, ofstream& out_file,
+		string& out_name) {
+	if (!in_file.is_open()) {
+		cerr << "Cannot open input file: " << in_name << endl;
+		exit(EXIT_FAILURE);
+	}
+
+	if (!out_file.is_open()) {
+		cerr << "Cannot open output file: " << out_name << endl;
+		exit(EXIT_FAILURE);
+	}
+}
+
+int main(int argc, char* argv[]) {
+
+	check_arguments(argc, argv);
+
+	double p_x = 0.0;
+	double p_y = 0.0;
+	double v = 0.0;
+	double yaw = 0.0;
+
+	double vx = 0.0;
+	double vy = 0.0;
+
+	VectorXd estimate(4);
+
+	string in_file_name_ = argv[1];
+	ifstream in_file_(in_file_name_.c_str(), ifstream::in);
+
+	string out_file_name_ = argv[2];
+	ofstream out_file_(out_file_name_.c_str(), ofstream::out);
+
+	string std_a_fromUser = argv[3];
+	double std_a =  atof(std_a_fromUser.c_str());
+
+	string std_yawdd_fromUser = argv[4];
+	double std_yawdd =  atof(std_yawdd_fromUser.c_str());
+
+	string P00_fromUser = argv[5];
+	double P00 =  atof(P00_fromUser.c_str());
+
+	string P11_fromUser = argv[6];
+	double P11 =  atof(P11_fromUser.c_str());
+
+	string P22_fromUser = argv[7];
+	double P22 =  atof(P22_fromUser.c_str());
+
+	string P33_fromUser = argv[8];
+	double P33 =  atof(P33_fromUser.c_str());
+
+	string P44_fromUser = argv[9];
+	double P44 =  atof(P44_fromUser.c_str());
+
+	// add the header information
+	out_file_ << "Sensor Type" << "\t";
+	out_file_ << "Estimated px" << "\t";
+	out_file_ << "Estimated py" << "\t";
+	out_file_ << "Estimated vx" << "\t";
+	out_file_ << "Estimated vy" << "\t";
+	out_file_ << "Measured px" << "\t";
+	out_file_ << "Measured py" << "\t";
+	out_file_ << "Actual px" << "\t";
+	out_file_ << "Actual py" << "\t";
+	out_file_ << "Actual vx" << "\t";
+	out_file_ << "Actual vy" << "\t";
+	out_file_ << "Error px" << "\t";
+	out_file_ << "Error py" << "\t";
+	out_file_ << "Error vx" << "\t";
+	out_file_ << "Error vy" << "\t";
+	out_file_ << "NIS" << "\n";
+
+	check_files(in_file_, in_file_name_, out_file_, out_file_name_);
+
+	vector<MeasurementPackage> measurement_pack_list;
+	vector<GroundTruthPackage> gt_pack_list;
+
+	string line;
+
+	// prep the measurement packages (each line represents a measurement at a
+	// timestamp)
+	while (getline(in_file_, line)) {
+
+		string sensor_type;
+		MeasurementPackage meas_package;
+		GroundTruthPackage gt_package;
+		istringstream iss(line);
+		long long timestamp;
+
+		// reads first element from the current line
+		iss >> sensor_type;
+		if (sensor_type.compare("L") == 0) {
+			// uncomment the following continue for radar only experiment
+			// continue;
+			// LASER MEASUREMENT
+
+			// read measurements at this timestamp
+			meas_package.sensor_type_ = MeasurementPackage::LASER;
+			gt_package.sensor_type_ = GroundTruthPackage::LASER;
+			meas_package.raw_measurements_ = VectorXd(2);
+			float x;
+			float y;
+			iss >> x;
+			iss >> y;
+			meas_package.raw_measurements_ << x, y;
+			iss >> timestamp;
+			meas_package.timestamp_ = timestamp;
+			measurement_pack_list.push_back(meas_package);
+		} else if (sensor_type.compare("R") == 0) {
+
+			// uncomment the following continue statement for lidar only experiment.
+			// continue;
+
+			// RADAR MEASUREMENT
+
+			// read measurements at this timestamp
+			meas_package.sensor_type_ = MeasurementPackage::RADAR;
+			gt_package.sensor_type_ = GroundTruthPackage::RADAR;
+			meas_package.raw_measurements_ = VectorXd(3);
+			float ro;
+			float phi;
+			float ro_dot;
+			iss >> ro;
+			iss >> phi;
+			iss >> ro_dot;
+			meas_package.raw_measurements_ << ro, phi, ro_dot;
+			iss >> timestamp;
+			meas_package.timestamp_ = timestamp;
+			measurement_pack_list.push_back(meas_package);
+		}
+
+		// read ground truth data to compare later
+		float x_gt;
+		float y_gt;
+		float vx_gt;
+		float vy_gt;
+		iss >> x_gt;
+		iss >> y_gt;
+		iss >> vx_gt;
+		iss >> vy_gt;
+		gt_package.gt_values_ = VectorXd(4);
+		gt_package.gt_values_ << x_gt, y_gt, vx_gt, vy_gt;
+		gt_pack_list.push_back(gt_package);
+	}
+
+	// Create a UKF instance
+	UKF ukf;
+
+	// used to compute the RMSE later
+	vector<VectorXd> estimations;
+	vector<VectorXd> ground_truth;
+
+	//Call the EKF-based fusion
+	size_t N = measurement_pack_list.size();
+	for (size_t k = 0; k < N; ++k) {
+		#if DEBUG
+		std::cout << std::endl << std::endl << __FILE__ << ":"<< __LINE__ << "---------------------------" << std::endl << k << std::endl;
+		std::cout << __FILE__ << ":"<< __LINE__ << "\tk" << std::endl << k << std::endl<< std::endl;
+
+		if (k == 14) {
+			cout << "Debug Break" << endl;
+		}
+		#endif
+		// start filtering from the second frame (the speed is unknown in the first
+		ukf.ProcessMeasurement(measurement_pack_list[k], std_a, std_yawdd, P00, P11, P22, P33, P44);
+
+		// output the estimation
+		if (measurement_pack_list[k].sensor_type_
+				== MeasurementPackage::RADAR) {
+			out_file_ << "R" << "\t";
+		} else {
+			out_file_ << "L" << "\t";
+		}
+		//px
+		out_file_ << ukf.x_(0) << "\t";
+
+		//py
+		out_file_ << ukf.x_(1) << "\t";
+
+		double velocity = ukf.x_(2);
+		double yawAngle = ukf.x_(3);
+
+		//vx
+		out_file_ << velocity * std::cos(yawAngle) << "\t";
+
+		//vy
+		out_file_ << velocity * std::sin(yawAngle) << "\t";
+
+		// output the measurements
+		if (measurement_pack_list[k].sensor_type_
+				== MeasurementPackage::LASER) {
+			// output the estimation
+			out_file_ << measurement_pack_list[k].raw_measurements_(0) << "\t";
+			out_file_ << measurement_pack_list[k].raw_measurements_(1) << "\t";
+
+		} else if (measurement_pack_list[k].sensor_type_
+				== MeasurementPackage::RADAR) {
+			// output the estimation in the cartesian coordinates
+			float ro = measurement_pack_list[k].raw_measurements_(0);
+			float phi = measurement_pack_list[k].raw_measurements_(1);
+			out_file_ << ro * cos(phi) << "\t"; // p1_meas
+			out_file_ << ro * sin(phi) << "\t"; // ps_meas
+		}
+
+		// output the ground truth packages
+		out_file_ << gt_pack_list[k].gt_values_(0) << "\t";
+		out_file_ << gt_pack_list[k].gt_values_(1) << "\t";
+		out_file_ << gt_pack_list[k].gt_values_(2) << "\t";
+		out_file_ << gt_pack_list[k].gt_values_(3) << "\t";
+
+		p_x = ukf.x_(0);
+		p_y = ukf.x_(1);
+		v = ukf.x_(2);
+		yaw = ukf.x_(3);
+
+		vx = cos(yaw) * v;
+		vy = sin(yaw) * v;
+
+		// Errors
+		out_file_ << p_x - gt_pack_list[k].gt_values_(0) << "\t";
+		out_file_ << p_y - gt_pack_list[k].gt_values_(1) << "\t";
+		out_file_ << vx - gt_pack_list[k].gt_values_(2) << "\t";
+		out_file_ << vy - gt_pack_list[k].gt_values_(3) << "\t";
+
+		// output the NIS values
+
+		if (measurement_pack_list[k].sensor_type_
+				== MeasurementPackage::LASER) {
+			out_file_ << ukf.NIS_laser_ << "\n";
+		} else if (measurement_pack_list[k].sensor_type_
+				== MeasurementPackage::RADAR) {
+			out_file_ << ukf.NIS_radar_ << "\n";
+		}
+
+		estimate(0) = p_x;
+		estimate(1) = p_y;
+		estimate(2) = vx;
+		estimate(3) = vy;
+
+		estimations.push_back(estimate);
+		ground_truth.push_back(gt_pack_list[k].gt_values_);
+
+
+		if(! ukf.x_.allFinite())
+		{
+			std::cout << "state vector not all finite for k = " << k << std::endl;
+			//assert(std::abs(ukf.x_(4) < 20));
+			assert(ukf.x_.allFinite());
+		}
+
+		if(! ukf.P_.allFinite())
+		{
+			std::cout << "state covariance matrix not all finite for k = " << k << std::endl;
+			//assert(std::abs(ukf.x_(4) < 20));
+			assert(ukf.P_.allFinite());
+		}
+
+
+	}
+
+	// compute the accuracy (RMSE)
+	Tools tools;
+	cout << "Accuracy - RMSE:" << endl
+			<< tools.CalculateRMSE(estimations, ground_truth) << endl << endl;
+
+	// close files
+	if (out_file_.is_open()) {
+		out_file_.close();
+	}
+
+	if (in_file_.is_open()) {
+		in_file_.close();
+	}
+
+	return 0;
+}
