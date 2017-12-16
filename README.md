@@ -12,6 +12,7 @@ Unlike the Extended Kalman Filter, the Unscented Kalman filter does not require 
 This project involves the Term 2 Simulator which can be downloaded [here](https://github.com/udacity/self-driving-car-sim/releases). Select "EKF/UKF" option.
 
 A sample frame from one of the videos overlaid path computed by the Unscented Kalman Filter is ![shown](https://github.com/RomanoViolet/Udacity-Unscented-Kalman-Filter/blob/master/Results/screenshot.png)
+The green trace is the path estimated by the Unscented Kalman Filter.
 
 ### Prerequisites
 _Ad-verbatim from Udacity's Instructions:_
